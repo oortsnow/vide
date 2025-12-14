@@ -4,6 +4,10 @@
     <img src="docs/public/full_logo.svg" width="600" />
 </div>
 
+Vide for Luau New Type Solver
+
+##
+
 Vide is a reactive Luau UI library inspired by [Solid](https://www.solidjs.com/).
 
 - Fully Luau typecheckable
