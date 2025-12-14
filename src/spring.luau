@@ -6,10 +6,11 @@ local create_source_node = graph.create_source_node
 local assert_stable_scope = graph.assert_stable_scope
 local evaluate_node = graph.evaluate_node
 local update_descendants = graph.update_descendants
-local push_scope_as_child_of = graph.push_scope_as_child_of
+local push_child_to_scope = graph.push_child_to_scope
 
 local UPDATE_RATE = 120
-local TOLERANCE_FACTOR = 10_000
+local TOLERANCE = 0.001
+local TOLERANCE_VECTOR = vector.create(TOLERANCE, TOLERANCE, TOLERANCE)
 
 type Animatable = number | CFrame | Color3 | UDim | UDim2 | Vector2 | Vector3
 
@@ -25,8 +26,7 @@ type SpringState<T> = {
     k: number, -- spring constant
     c: number, -- damping coeff
 
-    x0_123: vector, x0_456: vector, -- initial position
-    x_123: vector, x_456: vector, -- current position
+    x0_123: vector, x0_456: vector, -- current position
     x1_123: vector, x1_456: vector, -- target position
     v_123: vector, v_456: vector, -- current velocity
 
@@ -74,11 +74,7 @@ local type_to_vec6 = {
 
     Rect = function(v)
         return vector.create(v.Min.X, v.Min.Y, v.Max.X), vector.create(v.Max.Y, 0, 0)
-    end :: TypeToVec6<Rect>,
-
-    table = function(v)
-        return vector.create(v[1] or 0, v[2] or 0, v[3] or 0), vector.create(v[4] or 0, 0, 0)
-    end :: TypeToVec6<{ number }>
+    end :: TypeToVec6<Rect>
 }
 
 local vec6_to_type = {
@@ -87,7 +83,7 @@ local vec6_to_type = {
     end :: Vec6ToType<number>,
 
     CFrame = function(a, b)
-        return CFrame.new(a) * CFrame.fromEulerAnglesXYZ(b.X, b.Y, b.Z)
+        return CFrame.new(a) * CFrame.fromEulerAnglesXYZ(b.x, b.y, b.z)
     end :: Vec6ToType<CFrame>,
 
     Color3 = function(v)
@@ -112,11 +108,7 @@ local vec6_to_type = {
 
     Rect = function(a, b)
         return Rect.new(a.X, a.Y, a.Z, b.X)
-    end :: Vec6ToType<Rect>,
-
-    table = function(a, b)
-        return { a.X, a.Y, a.Z, b.X }
-    end :: Vec6ToType<{ number }>
+    end :: Vec6ToType<Rect>
 }
 
 local invalid_type = {
@@ -137,8 +129,10 @@ local function spring<T>(source: () -> T, period: number?, damping_ratio: number
     local owner = assert_stable_scope()
 
     -- https://en.wikipedia.org/wiki/Damping
+
     local w_n = 2*math.pi / (period or 1)
     local z = damping_ratio or 1
+
     local k = w_n^2
     local c_c = 2*w_n
     local c = z * c_c
@@ -154,12 +148,10 @@ local function spring<T>(source: () -> T, period: number?, damping_ratio: number
         c = c,
 
         x0_123 = vector.zero,
-        x_123 = vector.zero,
         x1_123 = vector.zero,
         v_123 = vector.zero,
 
         x0_456 = vector.zero,
-        x_456 = vector.zero,
         x1_456 = vector.zero,
         v_456 = vector.zero,
 
@@ -177,23 +169,22 @@ local function spring<T>(source: () -> T, period: number?, damping_ratio: number
     end
 
     local updater = create_node(owner, updater_effect, false :: any)
+
     evaluate_node(updater)
 
     -- set initial position to goal
-    data.x_123, data.x_456 = data.x1_123, data.x1_456
+    data.x0_123, data.x0_456 = data.x1_123, data.x1_456
 
     -- set output to goal
     output.cache = data.source_value
 
-    local config = function(p)
+    local setter = function(p)
         local x = p.position
         local v = p.velocity
         local dv = p.impulse
 
         if x then
-            local x_123, x_456 = type_to_vec6[typeof(x)](x)
-            data.x_123, data.x_456 = x_123, x_456
-            data.x0_123, data.x0_456 = x_123, x_456
+            data.x0_123, data.x0_456 = type_to_vec6[typeof(x)](x)
         end
 
         if v then
@@ -206,19 +197,18 @@ local function spring<T>(source: () -> T, period: number?, damping_ratio: number
             data.v_456 += dv_456
         end
 
-        -- schedule spring
         springs[data] = output
     end :: SpringSettings<T>
 
     return function(...)
         if select("#", ...) == 0 then -- no args were given
-            push_scope_as_child_of(output)
+            push_child_to_scope(output)
             return output.cache
         end
 
         -- set current position to value
         local v = ... :: T
-        data.x_123, data.x_456 = type_to_vec6[typeof(v)](v)
+        data.x0_123, data.x0_456 = type_to_vec6[typeof(v)](v)
 
         -- reset velocity
         data.v_123 = vector.zero
@@ -231,32 +221,21 @@ local function spring<T>(source: () -> T, period: number?, damping_ratio: number
         output.cache = v
 
         return v
-    end, config
-end
-
--- calculates a float tolerance, based on the magnitude of the float
-local function get_min_step(x: number): number
-    return x/TOLERANCE_FACTOR
-end
-local function get_min_vector_step(direction: vector): vector
-    return vector.create(
-        get_min_step(direction.x),
-        get_min_step(direction.y),
-        get_min_step(direction.z)
-    )
+    end, setter
 end
 
 local function step_springs(dt: number)
-    for s in springs do
-        local k = s.k
-        local c = s.c
-        local x_123, x_456 = s.x_123, s.x_456
-        local x1_123, x1_456 = s.x1_123, s.x1_456
-        local u_123, u_456 = s.v_123, s.v_456
+    for data in springs do
+        local k, c,
+        x0_123, x1_123, u_123,
+        x0_456, x1_456, u_456 =
+            data.k, data.c,
+            data.x0_123, data.x1_123, data.v_123,
+            data.x0_456, data.x1_456, data.v_456
 
         -- calculate displacement from target
-        local dx_123 = x_123 - x1_123
-        local dx_456 = x_456 - x1_456
+        local dx_123 = x0_123 - x1_123
+        local dx_456 = x0_456 - x1_456
 
         -- calculate spring force
         local fs_123 = dx_123*-k
@@ -266,46 +245,44 @@ local function step_springs(dt: number)
         local ff_123 = u_123*-c
         local ff_456 = u_456*-c
 
-        -- calculate acceleration
-        local a_123 = (fs_123 + ff_123)
-        local a_456 = (fs_456 + ff_456)
+        -- calculate acceleration step
+        local dv_123 = (fs_123 + ff_123)*dt
+        local dv_456 = (fs_456 + ff_456)*dt
 
-        -- step acceleration
-        local v_123 = u_123 + a_123*dt
-        local v_456 = u_456 + a_456*dt
+        -- apply acceleration step
+        local v_123 = u_123 + dv_123
+        local v_456 = u_456 + dv_456
 
-        -- step velocity
-        local y_123 = x_123 + v_123*dt
-        local y_456 = x_456 + v_456*dt
+        -- calculate new position
+        local x_123 = x0_123 + v_123*dt
+        local x_456 = x0_456 + v_456*dt
 
-        s.x_123, s.x_456 = y_123, y_456
-        s.v_123, s.v_456 = v_123, v_456
+        data.x0_123, data.x0_456 = x_123, x_456
+        data.v_123, data.v_456 = v_123, v_456
     end
 end
 
 local function update_spring_sources()
     for data, output in springs do
-        local x0_123, x0_456 = data.x0_123, data.x0_456
-        local x_123, x_456 = data.x_123, data.x_456
-        local x1_123, x1_456 = data.x1_123, data.x1_456
-        local v_123, v_456 = data.v_123, data.v_456
+        local x0_123, x1_123, v_123,
+        x0_456, x1_456, v_456 =
+            data.x0_123, data.x1_123, data.v_123,
+            data.x0_456, data.x1_456, data.v_456
 
-        local tol_123 = vector.abs(get_min_vector_step(x0_123 - x1_123))
-        local tol_456 = vector.abs(get_min_vector_step(x0_456 - x1_456))
+        local max_difference = vector.max(
+            vector.abs(x0_123 - x1_123 :: any),
+            vector.abs(x0_456 - x1_456 :: any),
+            vector.abs(v_123 :: any),
+            vector.abs(v_456 :: any),
+            TOLERANCE_VECTOR
+        )
 
-        if
-            -- position is at goal (within tolerance)
-            vector.max(vector.abs(x_123 - x1_123), tol_123) == tol_123
-            and vector.max(vector.abs(x_456 - x1_456), tol_456) == tol_456
-
-            -- velocity is at 0 (within tolerance)
-            and vector.max(vector.abs(v_123/10), tol_123) == tol_123
-            and vector.max(vector.abs(v_456/10), tol_456) == tol_456
-        then
+        if max_difference == TOLERANCE_VECTOR then
+            -- close enough to target, unshedule spring and set value to target
             springs[data] = nil
             output.cache = data.source_value
         else
-            output.cache = vec6_to_type[typeof(data.source_value)](x_123, x_456)
+            output.cache = vec6_to_type[typeof(data.source_value)](x0_123, x0_456)
         end
 
         update_descendants(output)

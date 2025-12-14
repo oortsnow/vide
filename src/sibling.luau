@@ -3,12 +3,14 @@ type Node<T> = graph.Node<T>
 local create_node = graph.create_node
 local push_scope = graph.push_scope
 local pop_scope = graph.pop_scope
+local get_scope = graph.get_scope
 local destroy = graph.destroy
 
 local refs = {}
 
-local function root<T...>(fn: (destroy: () -> ()) -> T...): (() -> (), T...)
-    local node = create_node(false, false, false)
+local function sibling<T...>(fn: (destroy: () -> ()) -> T...): (() -> (), T...)
+    local scope = get_scope()
+    local node = create_node(scope or false :: false, false, false)
 
     refs[node] = true -- prevent gc of root node
 
@@ -32,4 +34,4 @@ local function root<T...>(fn: (destroy: () -> ()) -> T...): (() -> (), T...)
     return destroy, unpack(result :: any, 2)
 end
 
-return root :: <T...>(fn: (destroy: () -> ()) -> T...) -> (() -> (), T...)
+return sibling :: <T...>(fn: (destroy: () -> ()) -> T...) -> (() -> (), T...)
