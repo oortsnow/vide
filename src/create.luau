@@ -464,11 +464,19 @@ type function getvideproperties(instancename: type, instances: type, instancetyp
 	local function_returns_child = types.newfunction()
 	local nested_table_or_function_or_child = types.newtable()
 	local simple_child_table = types.newtable()
-	local union =
-		types.unionof(instancetype, function_returns_child, nested_table_or_function_or_child, simple_child_table)
+	local instance_array = types.newtable()
+	local union = types.unionof(
+		instancetype,
+		function_returns_child,
+		nested_table_or_function_or_child,
+		simple_child_table,
+		instance_array,
+		types.boolean
+	)
 
 	nested_table_or_function_or_child:setindexer(types.number, union)
-	simple_child_table:setindexer(types.number, instancetype)
+	simple_child_table:setindexer(types.number, types.unionof(instancetype, types.boolean, nil_type))
+	instance_array:setindexer(types.number, instancetype)
 	function_returns_child:setreturns({ union })
 
 	vide_props:setindexer(
@@ -479,7 +487,9 @@ type function getvideproperties(instancename: type, instances: type, instancetyp
 			function_returns_child,
 			nested_table_or_function_or_child,
 			simple_child_table,
-			nil_type
+			instance_array,
+			nil_type,
+			types.boolean
 		)
 	)
 
