@@ -1,4 +1,4 @@
-local graph = require "./graph"
+local graph = require("./graph")
 type Node<T> = graph.Node<T>
 local create_node = graph.create_node
 local get_scope = graph.get_scope
@@ -6,71 +6,75 @@ local push_scope = graph.push_scope
 local pop_scope = graph.pop_scope
 local set_context = graph.set_context
 
-export type Context<T> = (() -> T) & (<U>(T, () -> U) -> U)
+export type Context<T> = (() -> T) | (<U>(T, () -> U) -> U)
 
 local nil_symbol = newproxy()
 local count = 0
 
 local function context<T>(...: T): Context<T>
-    count += 1
-    local id = count
+	count += 1
+	local id = count
 
-    local has_default = select("#", ...) > 0
-    local default_value = ...
+	local has_default = select("#", ...) > 0
+	local default_value = ...
 
-    return function<T>(...): any -- todo: fix type error
-        local scope: Node<unknown>? | false = get_scope()
+	return function<T>(...): any -- todo: fix type error
+		local scope: Node<unknown>? | false = get_scope()
 
-        if select("#", ...) == 0 then -- get
-            while scope do
-                assert(scope)
-                local actal_scope: Node<unknown> = scope
-                local ctx = actal_scope.context
-    
-                if not ctx then
-                    scope = actal_scope.owner
-                    continue
-                end
+		if select("#", ...) == 0 then -- get
+			while scope do
+				assert(scope)
+				local actal_scope: Node<unknown> = scope
+				local ctx = actal_scope.context
 
-                local value = (ctx :: { any })[id]
+				if not ctx then
+					scope = actal_scope.owner
+					continue
+				end
 
-                if value == nil then
-                    scope = actal_scope.owner
-                    continue
-                end
-                
-                return (if value ~= nil_symbol then value else nil) :: T
-            end
+				local value = (ctx :: { any })[id]
 
-            if has_default then
-                return default_value
-            else
-                error("attempt to get context when no context is set and no default context is set", 0)
-            end
-        else -- set
-            if not scope then return error("attempt to set context outside of a vide scope", 0) end
+				if value == nil then
+					scope = actal_scope.owner
+					continue
+				end
 
-            local value, component = ...
-            
-            local new_scope = create_node(scope, false, false)
-            set_context(new_scope, id, if value == nil then nil_symbol else value)
+				return (if value ~= nil_symbol then value else nil) :: T
+			end
 
-            push_scope(new_scope)
+			if has_default then
+				return default_value
+			else
+				error("attempt to get context when no context is set and no default context is set", 0)
+			end
+		else -- set
+			if not scope then
+				return error("attempt to set context outside of a vide scope", 0)
+			end
 
-            local function efn(err: string) return debug.traceback(err, 3) end
-            local ok, result = xpcall(component, efn)
+			local value, component = ...
 
-            pop_scope()
+			local new_scope = create_node(scope, false, false)
+			set_context(new_scope, id, if value == nil then nil_symbol else value)
 
-            if not ok then
-                error(`error while running context:\n\n{result}`, 0)
-            end
+			push_scope(new_scope)
 
-            return result
-        end
+			local function efn(err: string)
+				return debug.traceback(err, 3)
+			end
+			local ok, result = xpcall(component, efn)
 
-        return nil :: any
-    end
+			pop_scope()
+
+			if not ok then
+				error(`error while running context:\n\n{result}`, 0)
+			end
+
+			return result
+		end
+
+		return nil :: any
+	end
 end
 
 return context
