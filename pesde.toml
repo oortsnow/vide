@@ -1,10 +1,10 @@
-name = "centau/vide"
-version = "0.4.0"
+name = "oortsnow/vide"
+version = "0.4.5"
 description = "A reactive Luau library for creating UI."
-authors = ["centau"]
-repository = "https://github.com/centau/vide"
+authors = ["oortsnow"]
+repository = "https://github.com/oortsnow/vide"
 license = "MIT"
-includes = ["src/*", "README.md", "pesde.toml"]
+includes = ["src/*", "README.md", "LICENSE.md", "pesde.toml"]
 
 [target]
 environment = "roblox"

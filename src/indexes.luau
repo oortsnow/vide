@@ -1,7 +1,7 @@
-local flags = require "./flags"
-local branch = require "./branch"
-local source = require "./source"
-local effect = require "./effect"
+local branch = require('./branch')
+local effect = require('./effect')
+local flags = require('./flags')
+local source = require('./source')
 local timeout = require "./timeout" ()
 
 type Array<T> = { T }
@@ -10,7 +10,7 @@ type Source<T> = () -> T
 
 local function indexes<K, V, Obj>(
     input: Source<Map<K, V>>,
-    component: (Source<V>, K, Source<boolean>) -> (Obj, ...number)
+    component: (value: Source<V>, index: K, present: Source<boolean>) -> (Obj, ...number)
 ): Source<Array<Obj>>
     local update_count = 0
     local scopes = {} :: Map<K, {
