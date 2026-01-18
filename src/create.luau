@@ -7,16 +7,14 @@ local flags = require("./flags")
 
 local ctor_cache = {} :: { [string]: (AnyProps) -> Instance }
 local function lazy_init(_, class: string)
-	local defaults = defaults :: { [string]: { [string]: unknown } }
-
 	local function ctor(properties: AnyProps): Instance
-		local ok, instance: Instance = pcall(Instance.new, class)
+		local ok, instance: Instance = pcall(Instance.new, class :: any)
 		if not ok then
 			error(`invalid class name {class}`, 0)
 		end
 
 		if flags.defaults then
-			local default = defaults[class]
+			local default: { [string]: unknown }? = defaults[class]
 			if default then
 				for i, v in default do
 					(instance :: any)[i] = v
@@ -50,8 +48,6 @@ local function create(class_or_instance: string | Instance, properties: AnyProps
 
 	return if properties then ctor(properties) else ctor
 end
-
-type AnyProps = { [any]: any }
 
 export type CreatableInstances = {
 	Accessory: Accessory,
@@ -383,21 +379,7 @@ type function get_instance_properties(instance_name: type, instances: type, inst
 		return types.never
 	end
 
-	local properties = {}
-
-	local function get_signal(value: type): type?
-		if not (value:is("class") or value:is("table")) then
-			return nil
-		end
-
-		for key, value in value:properties() do
-			if key:value() == "Connect" and value.read and value.read.tag == "function" then
-				return value.read
-			end
-		end
-
-		return nil
-	end
+	local vide_props = types.newtable()
 
 	local function get_properties(instance: type)
 		local parent = instance:readparent()
@@ -405,30 +387,36 @@ type function get_instance_properties(instance_name: type, instances: type, inst
 			get_properties(parent)
 		end
 
-		for key, value in instance:properties() do
+		for index, value in instance:properties() do
 			if value.read then
-				local signal = get_signal(value.read)
-
 				if value.read:is("function") or value.read:is("intersection") then
 					continue
-				elseif signal then
-					local callback_params = signal:parameters()
-					if callback_params.head then
-						table.remove(callback_params.head, 1)
-						properties[key] = types.unionof(callback_params.head[1], nil_type)
-					end
-				elseif value.write then
-					local value = value.write
-					local type = types.unionof(value, types.newfunction({}, { head = { value } }), nil_type)
-
-					properties[key] = type
 				end
+			end
+
+			local connector = value.read
+				and value.read.tag == "table"
+				and value.read:readproperty(types.singleton("Connect"))
+			if connector then
+				local params = connector:parameters().head
+				if not params then
+					continue
+				end
+				local listener = params[2]
+				if not listener then
+					continue
+				end
+				vide_props:setproperty(index, types.optional(listener))
+			elseif value.write then
+				vide_props:setproperty(
+					index,
+					types.optional(types.unionof(value.write, types.newfunction({}, { head = { value.write } })))
+				)
 			end
 		end
 	end
 	get_properties(instance)
 
-	local vide_props = types.newtable(properties)
 	local vide_action = types.newtable({
 		[types.singleton("priority")] = types.number,
 		[types.singleton("callback")] = types.newfunction({ head = { instance } }),
